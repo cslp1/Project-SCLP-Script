@@ -13,7 +13,6 @@
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local HttpService = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local currentPlaceId = game.PlaceId
 
@@ -89,7 +88,6 @@ local function getTopPos(part)
     return part.Position + Vector3.new(0, halfTop + PLAYER_FOOT_OFFSET, 0)
 end
 
-local currentPlaceId = game.PlaceId
 
 -- Auto Play moves by writing HumanoidRootPart.CFrame, not by walking, so nothing about
 -- the motion is physical. Cover a long hop in a short step and the character jumps tens
@@ -99,15 +97,6 @@ local currentPlaceId = game.PlaceId
 -- the run overrun its configured time rather than move faster than the kit can track.
 -- ToER at its registered 3:05 kicked every attempt; stretched out, it ran clean.
 local MAX_WALK_SPEED = 90   -- studs/second (~1.5 studs per frame at 60fps)
-
--- True if a tower's folder is actually loaded in workspace.Towers right now. Used so
--- the dropdown shows the towers physically present in the current place even if the
--- registry's hardcoded category PlaceId no longer matches (e.g. after a game update),
--- instead of silently filtering everything out and leaving a blank tower list.
-local function towerFolderPresent(name)
-    local towersFolder = workspace:FindFirstChild("Towers")
-    return towersFolder ~= nil and towersFolder:FindFirstChild(name) ~= nil
-end
 
 local function towerFolder(name)
     local towersFolder = workspace:FindFirstChild("Towers")
@@ -504,7 +493,6 @@ end
 -- ============================================================
 --  WALKER
 -- ============================================================
-local MAX_WALK_SPEED = 90
 local running = false
 
 local function hrpNow()
@@ -699,7 +687,6 @@ local Tabs = {
     Settings = Window:AddTab("Settings", "settings"),
 }
 local Options = Library.Options
-local Toggles = Library.Toggles
 
 local TowerBox  = Tabs.Main:AddLeftGroupbox("Tower")
 local ActionBox = Tabs.Main:AddRightGroupbox("Actions")
