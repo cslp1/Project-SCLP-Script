@@ -12,6 +12,7 @@
 
 local Players    = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local currentPlaceId = game.PlaceId
@@ -538,37 +539,86 @@ local function walk(steps, budget)
             forceTouch(step.target)
 
         else
-            local dist     = (step.destPos - hrp.Position).Magnitude
-            local timeLeft = math.max(deadline - os.clock(), 0.001)
-            local remDist  = remaining[i]
-            local stepTime = math.max(remDist > 0 and (timeLeft * (dist / remDist)) or 0.05, 0.05)
-            -- Never let the time budget dictate a speed the game can't track a touch at.
-            stepTime = math.max(stepTime, dist / MAX_WALK_SPEED)
+            -- Ported from EToH Script.lua's Auto Play walker.
+            local dist       = (step.destPos - hrp.Position).Magnitude
+            local timeLeft   = math.max(deadline - os.clock(), 0.001)
+            local remainDist = remaining[i]
+            local stepTime   = remainDist > 0 and (timeLeft * (dist / remainDist)) or 0.05
+            stepTime         = math.max(stepTime, 0.05)
+            -- Never let the budget dictate a speed the game can't track a touch at.
+            stepTime         = math.max(stepTime, dist / MAX_WALK_SPEED)
 
-            local start, done = os.clock(), false
-            local conn
-            conn = RunService.Heartbeat:Connect(function(dt)
-                local h = hrpNow()
-                if not h or not running then done = true conn:Disconnect() return end
-                local dest = (step.target and step.target.Parent)
-                    and getTopPos(step.target) or step.destPos
-                local left = (dest - h.Position).Magnitude
-                if left <= 0.15 then done = true conn:Disconnect() return end
-                local speed = dist / stepTime
-                local move  = math.min(speed * dt, left)
-                local dir   = (dest - h.Position)
-                if dir.Magnitude < 0.001 then return end
-                dir = dir.Unit
-                if dir ~= dir then return end
-                h.CFrame = CFrame.new(h.Position + dir * move) * (h.CFrame - h.CFrame.Position)
-                if os.clock() - start >= stepTime then
-                    h.CFrame = CFrame.new(dest) * (h.CFrame - h.CFrame.Position)
-                    done = true
-                    conn:Disconnect()
+            local startTime  = os.clock()
+            local moveTarget = step.target
+            -- A checkpoint that has drifted since the route resolved is a moving platform,
+            -- and needs chasing rather than a tween to a stale position.
+            local isMoving   = moveTarget and moveTarget.Parent and
+                               (getTopPos(moveTarget) - step.destPos).Magnitude > 0.5
+            local done       = false
+
+            if not isMoving then
+                local dest  = CFrame.new(step.destPos) * (hrp.CFrame - hrp.CFrame.Position)
+                local tween = TweenService:Create(hrp, TweenInfo.new(stepTime, Enum.EasingStyle.Linear), { CFrame = dest })
+                tween:Play()
+                tween.Completed:Connect(function() done = true end)
+                repeat task.wait() until done or not running
+                tween:Cancel()
+            else
+                -- Arrival is by touch here: the platform is moving, so a distance check
+                -- against a position sampled last frame is never quite right.
+                local touchConn
+                if moveTarget then
+                    touchConn = moveTarget.Touched:Connect(function(hit)
+                        local c = player.Character
+                        if c and hit:IsDescendantOf(c) then done = true end
+                    end)
                 end
-            end)
-            while running and not done do task.wait() end
-            if conn.Connected then conn:Disconnect() end
+                local stepStartPos    = hrp.Position
+                local maxStepProgress = 0
+                local moveConn
+                moveConn = RunService.Heartbeat:Connect(function(dt)
+                    if not running then done = true moveConn:Disconnect() return end
+                    local c = player.Character
+                    local h = c and c:FindFirstChild("HumanoidRootPart")
+                    if not h then done = true moveConn:Disconnect() return end
+                    local currentDest = step.destPos
+                    if moveTarget and moveTarget.Parent then
+                        currentDest = getTopPos(moveTarget)
+                    end
+                    local currentDist = (currentDest - h.Position).Magnitude
+                    if currentDist <= 0.1 then done = true moveConn:Disconnect() return end
+                    local speed    = stepTime > 0 and (dist / stepTime) or 50
+                    local moveDist = math.min(speed * dt, currentDist)
+                    local rawDir   = (currentDest - h.Position)
+                    if rawDir.Magnitude < 0.001 then return end
+                    local dir = rawDir.Unit
+                    if dir ~= dir then return end
+
+                    -- Never let a physics correction erase progress already made toward
+                    -- this checkpoint.
+                    local totalVec = currentDest - stepStartPos
+                    local totalLen = totalVec.Magnitude
+                    local nextPos  = h.Position + dir * moveDist
+                    if totalLen > 0.001 then
+                        local routeDir = totalVec.Unit
+                        local currentProgress = math.clamp((h.Position - stepStartPos):Dot(routeDir), 0, totalLen)
+                        maxStepProgress = math.max(maxStepProgress, currentProgress)
+                        local proposedProgress = math.clamp((nextPos - stepStartPos):Dot(routeDir), 0, totalLen)
+                        proposedProgress = math.max(proposedProgress, math.min(maxStepProgress + moveDist, totalLen))
+                        nextPos = stepStartPos + routeDir * proposedProgress
+                        maxStepProgress = proposedProgress
+                    end
+                    h.CFrame = CFrame.new(nextPos)
+                    if (os.clock() - startTime) >= stepTime then
+                        h.CFrame = CFrame.new(currentDest)
+                        done = true
+                        moveConn:Disconnect()
+                    end
+                end)
+                repeat task.wait() until done or not running
+                if moveConn then moveConn:Disconnect() end
+                if touchConn then touchConn:Disconnect() end
+            end
             forceTouch(step.target)
         end
     end
