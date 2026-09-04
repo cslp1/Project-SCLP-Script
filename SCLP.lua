@@ -47,6 +47,23 @@ do
     end
 end
 
+-- ===== per-game entry overrides =====
+-- Loaded as data so a game with an unusual portal layout can be supported by editing
+-- Portals.lua rather than this script.
+local PortalOverride = {}
+do
+    local src = fetch(REPO .. "Portals.lua")
+    if src then
+        local fn = loadstring(src)
+        if fn then
+            local ok, tbl = pcall(fn)
+            if ok and type(tbl) == "table" and tbl[currentPlaceId] then
+                PortalOverride = tbl[currentPlaceId]
+            end
+        end
+    end
+end
+
 local uiRepo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/398653c103a0b4a8d2a3b68bcd383af21814a512/"
 local Library      = loadstring(game:HttpGet(uiRepo .. "Library.lua"))()
 local SaveManager  = loadstring(game:HttpGet(uiRepo .. "addons/SaveManager.lua"))()
@@ -126,7 +143,25 @@ local function resolveTPFrame(name)
     local f = towerFolder(name)
     if not f then return nil end
 
-    -- EToH's exact nesting first: cheapest, and unambiguous when it's there.
+    -- This game's own layout first, if Portals.lua describes one. An explicit path beats
+    -- guessing by name, and a game that reuses a common name for something else can be
+    -- steered to the right part here rather than tripping over the generic list below.
+    if PortalOverride.nested then
+        local node = f
+        for _, seg in ipairs(PortalOverride.nested) do
+            node = node and node:FindFirstChild(seg)
+        end
+        local part = toBasePart(node)
+        if part then return part end
+    end
+    if PortalOverride.names then
+        for _, candidate in ipairs(PortalOverride.names) do
+            local part = toBasePart(f:FindFirstChild(candidate, true))
+            if part then return part end
+        end
+    end
+
+    -- EToH's exact nesting next: cheapest, and unambiguous when it's there.
     local tp    = f:FindFirstChild("Teleporter")
     local inner = tp and tp:FindFirstChild("Teleporter")
     local exact = inner and inner:FindFirstChild("TPFRAME")
@@ -145,6 +180,9 @@ local function resolveTPFrame(name)
     for _, descendant in ipairs(f:GetDescendants()) do
         if descendant:IsA("BasePart") then
             local lower = descendant.Name:lower()
+            for _, hint in ipairs(PortalOverride.hints or {}) do
+                if lower:find(hint, 1, true) then return descendant end
+            end
             for _, hint in ipairs(PORTAL_HINTS) do
                 if lower:find(hint, 1, true) then return descendant end
             end
@@ -835,6 +873,46 @@ ActionBox:AddButton({
 local SettingsBox = Tabs.Settings:AddLeftGroupbox("Script")
 SettingsBox:AddLabel(("Game: %s (%s)"):format(GameInfo.name, GameInfo.abbr), true)
 SettingsBox:AddLabel(("Place: %d"):format(currentPlaceId))
+SettingsBox:AddButton({
+    Text    = "Dump Tower Structure",
+    Tooltip = "Print the selected tower's folder tree to the console, plus what the script currently resolves as its entry. Use this when a game's portals aren't found, then add its layout to Portals.lua.",
+    Func = function()
+        local name = Options.TowerSelect and Options.TowerSelect.Value
+        if not name or name == "" then notify("Pick a tower first.") return end
+        local f = towerFolder(name)
+        if not f then
+            warn(("[SCLP] no folder named '%s' in workspace.Towers"):format(name))
+            notify(name .. " isn't loaded.", 4)
+            return
+        end
+        print(("=== %s / %s (place %d) ==="):format(GameInfo.abbr, name, currentPlaceId))
+        -- Two levels is enough to spot the entry: deeper is usually the obby itself.
+        local function dump(node, depth, prefix)
+            for _, c in ipairs(node:GetChildren()) do
+                local extra = ""
+                if c:IsA("BasePart") then
+                    extra = (" [%.0f,%.0f,%.0f]"):format(c.Position.X, c.Position.Y, c.Position.Z)
+                elseif #c:GetChildren() > 0 then
+                    extra = (" (%d children)"):format(#c:GetChildren())
+                end
+                print(("%s%s (%s)%s"):format(prefix, c.Name, c.ClassName, extra))
+                if depth > 0 and #c:GetChildren() <= 25 then
+                    dump(c, depth - 1, prefix .. "    ")
+                end
+            end
+        end
+        dump(f, 2, "  ")
+        local entry = resolveTPFrame(name)
+        local dest  = resolveTeleportTo(name)
+        print(("resolved entry : %s"):format(entry and entry:GetFullName() or "NONE"))
+        print(("resolved dest  : %s"):format(dest and dest:GetFullName() or "NONE"))
+        if not entry then
+            print("No entry found. Add this place to Portals.lua with the right name or path.")
+        end
+        notify("Structure printed to console.", 4)
+    end,
+})
+
 SettingsBox:AddButton({
     Text = "Unload",
     Func = function()

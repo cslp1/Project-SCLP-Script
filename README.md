@@ -25,7 +25,7 @@ That means a game released tomorrow works without a code change.
 
 | Difference | Handling |
 |---|---|
-| Entry is `TPFRAME` + `TeleportTo`, or one combined part (`Portal`, `TowerStart`) | `resolveTeleportTo` falls back to the entry part when there's no separate `TeleportTo` |
+| Entry is `TPFRAME` + `TeleportTo`, or one combined part (`Portal`, `TowerStart`) | Four passes: this game's entry in `Portals.lua`, then EToH's exact nesting, then a list of common names, then a substring match |
 | Parts in a per-tower `Obby`, or one shared `workspace.Parts` | Detected from the world, not a place-id list; `Obby` first, `workspace.Parts` as fallback |
 | Floors named `FloorN`, or only colour-banded | Named floors win; otherwise colour bands, merged so decoration doesn't open spurious floors |
 
@@ -54,3 +54,23 @@ return function()
     }
 end
 ```
+
+## When a game's portals aren't found
+
+Entry parts are the least consistent thing across these games, so resolution is
+data-driven rather than hardcoded. If a game isn't working:
+
+1. Select the tower, hit **Dump Tower Structure** in Settings
+2. The console prints the folder tree and what the script currently resolves
+3. Add the place to `Portals.lua` with the name or path it actually uses
+
+```lua
+[10283991824] = { names = { "TP", "Portal" } },          -- by name
+[8562822414]  = { nested = { "Teleporter", "Teleporter", "TPFRAME" } },  -- by path
+```
+
+`nested` is an explicit path from the tower folder down, for layouts where a name alone is
+ambiguous. It's tried before everything else, so a game that reuses a common name for
+something unrelated can still be steered to the right part.
+
+No code change needed — the script fetches `Portals.lua` at load.
