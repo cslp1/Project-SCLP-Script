@@ -478,6 +478,39 @@ local function safeAbbr(a)
     return (a:gsub("[^%w%-_]", ""))
 end
 
+-- The set of towers with a published route for this game, so the menu can say what is
+-- already recorded. Uses the GitHub contents API rather than a manifest file in the repo:
+-- a manifest would have to be updated by hand every time a route is committed, and would
+-- be wrong the moment someone forgot.
+local publishedRoutes, publishedCount = {}, -1   -- -1 = not looked up yet
+local function refreshRouteList()
+    local url = ("https://api.github.com/repos/cslp1/Project-SCLP-Script/contents/Routes/%s")
+        :format(safeAbbr(GameInfo.abbr))
+    local body
+    local req = (syn and syn.request) or (http and http.request) or http_request or request
+    if req then
+        local ok, res = pcall(req, { Url = url, Method = "GET" })
+        if ok and res and res.Body then body = res.Body end
+    end
+    if not body then
+        local ok, b = pcall(function() return game:HttpGet(url) end)
+        if ok then body = b end
+    end
+    if not body then
+        publishedCount = -1   -- couldn't reach the API; say so rather than claim zero
+        return
+    end
+    local found = {}
+    local n = 0
+    -- Pull names straight out of the JSON rather than decoding the whole payload: the
+    -- listing carries a lot of fields per file and only the name matters here.
+    for name in body:gmatch('"name"%s*:%s*"([^"]-)%.lua"') do
+        found[name] = true
+        n = n + 1
+    end
+    publishedRoutes, publishedCount = found, n
+end
+
 local function fetchRoute(towerName)
     local src = fetch(("%sRoutes/%s/%s.lua"):format(REPO, safeAbbr(GameInfo.abbr), towerName))
     if not src then return nil end
@@ -721,11 +754,18 @@ local function refreshTowers()
     end
 end
 
+-- Declared before the dropdown below, whose callback calls it. A later `local function`
+-- would not be in scope there and would resolve to a nil global instead.
+local refreshRoutesLabel
+
 TowerBox:AddDropdown("TowerSelect", {
-    Text    = "Tower",
-    Values  = {},
-    Default = "",
-    Tooltip = "Every tower currently loaded in workspace.Towers.",
+    Text     = "Tower",
+    Values   = {},
+    Default  = "",
+    Tooltip  = "Every tower currently loaded in workspace.Towers.",
+    Callback = function()
+        refreshRoutesLabel()
+    end,
 })
 TowerBox:AddDropdown("RouteOrder", {
     Text    = "Automake order",
@@ -739,6 +779,21 @@ TowerBox:AddInput("TimeBudget", {
     Placeholder = "3:05",
     Tooltip     = "How long the walk should take. Too short and the character outruns the game's own touch detection, which some towers reject.",
 })
+local routesLabel = TowerBox:AddLabel("Routes: checking...", true)
+refreshRoutesLabel = function()
+    local name = Options.TowerSelect and Options.TowerSelect.Value
+    if publishedCount < 0 then
+        pcall(function() routesLabel:SetText("Routes: couldn't reach GitHub") end)
+        return
+    end
+    local head = ("Routes: %d published for %s"):format(publishedCount, GameInfo.abbr)
+    if name and name ~= "" then
+        head = head .. (publishedRoutes[name] and ("  |  " .. name .. " has one")
+                                              or ("  |  " .. name .. " has none"))
+    end
+    pcall(function() routesLabel:SetText(head) end)
+end
+
 local statusLabel = TowerBox:AddLabel("Idle.", true)
 local function setStatus(t) pcall(function() statusLabel:SetText(t) end) end
 
@@ -938,6 +993,13 @@ SaveManager:LoadAutoloadConfig()
 
 -- Towers stream in and out as you move, so keep the list current.
 refreshTowers()
+
+-- Look up what's already published for this game. Spawned rather than inline: it is a
+-- network round trip, and the menu should not sit blank waiting on GitHub.
+task.spawn(function()
+    refreshRouteList()
+    refreshRoutesLabel()
+end)
 table.insert(SCLP.conns, RunService.Heartbeat:Connect(function()
     if SCLP._next and os.clock() < SCLP._next then return end
     SCLP._next = os.clock() + 1
