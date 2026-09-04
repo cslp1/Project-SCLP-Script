@@ -482,8 +482,15 @@ end
 -- ============================================================
 -- A published route lives at Routes/<abbr>/<tower>.lua in this repo. Nothing has to exist
 -- there: with no file, Automake Route builds one from the tower's own parts.
+-- Abbreviations like "TC:L", "TWR$" and "bl:r" can't be folder names -- a colon is
+-- illegal on Windows and both are awkward in a URL -- so routes are filed under a
+-- stripped form. Keep this in step with the folder names in Routes/.
+local function safeAbbr(a)
+    return (a:gsub("[^%w%-_]", ""))
+end
+
 local function fetchRoute(towerName)
-    local src = fetch(("%sRoutes/%s/%s.lua"):format(REPO, GameInfo.abbr, towerName))
+    local src = fetch(("%sRoutes/%s/%s.lua"):format(REPO, safeAbbr(GameInfo.abbr), towerName))
     if not src then return nil end
     local fn = loadstring(src)
     if not fn then return nil end
@@ -873,6 +880,7 @@ ActionBox:AddButton({
 local SettingsBox = Tabs.Settings:AddLeftGroupbox("Script")
 SettingsBox:AddLabel(("Game: %s (%s)"):format(GameInfo.name, GameInfo.abbr), true)
 SettingsBox:AddLabel(("Place: %d"):format(currentPlaceId))
+SettingsBox:AddLabel(("Routes folder: Routes/%s/"):format(safeAbbr(GameInfo.abbr)))
 SettingsBox:AddButton({
     Text    = "Dump Tower Structure",
     Tooltip = "Print the selected tower's folder tree to the console, plus what the script currently resolves as its entry. Use this when a game's portals aren't found, then add its layout to Portals.lua.",
