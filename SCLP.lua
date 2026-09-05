@@ -256,17 +256,48 @@ end
 -- But some towers group their obby into section Models, so the top level holds no
 -- BaseParts at all -- fall back to the full descendant list instead of reporting the
 -- container as empty (which is what "CoIV's Obby has no parts" was).
+-- Automake takes every BasePart it finds, which on a dense tower means walls, trim, kill
+-- bricks and decoration all become checkpoints -- one EToH tower yields 3115 of them, and
+-- the result is a tour of the geometry rather than a climb. Nothing marks a part as
+-- walkable, so this rules out what clearly is not.
+local WALKABLE_MAX_STUD = 220   -- bigger than this is tower structure, not an obstacle
+local WALKABLE_MIN_AREA = 4     -- smaller top face than this is trim you can't land on
+
+local function isWalkable(part)
+    -- You cannot stand on something with collision off; this alone removes most
+    -- decoration and every kill brick a godmode has already disarmed.
+    if not part.CanCollide then return false end
+    if part.Name == "Kill Brick" then return false end
+    local kills = part:FindFirstChild("kills")
+    if kills and kills:IsA("BoolValue") and kills.Value then return false end
+    local size = part.Size
+    if size.X > WALKABLE_MAX_STUD or size.Z > WALKABLE_MAX_STUD then return false end
+    if (size.X * size.Z) < WALKABLE_MIN_AREA then return false end
+    return true
+end
+
+-- Falls back to the unfiltered list rather than returning nothing: a tower built entirely
+-- from parts this rejects would otherwise report "no parts" and be unplayable.
 local function gatherParts(container)
-    local direct = {}
+    local direct, directAll = {}, {}
     for _, v in ipairs(container:GetChildren()) do
-        if v:IsA("BasePart") then direct[#direct + 1] = v end
+        if v:IsA("BasePart") then
+            directAll[#directAll + 1] = v
+            if isWalkable(v) then direct[#direct + 1] = v end
+        end
     end
     if #direct > 0 then return direct end
-    local all = {}
+    if #directAll > 0 then return directAll end
+
+    local all, allAll = {}, {}
     for _, v in ipairs(container:GetDescendants()) do
-        if v:IsA("BasePart") then all[#all + 1] = v end
+        if v:IsA("BasePart") then
+            allAll[#allAll + 1] = v
+            if isWalkable(v) then all[#all + 1] = v end
+        end
     end
-    return all
+    if #all > 0 then return all end
+    return allAll
 end
 
 local function collectAutoRoute(name, descending)
